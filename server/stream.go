@@ -36,6 +36,13 @@ import (
 	"github.com/nats-io/nuid"
 )
 
+type streamConfig struct {
+	StreamConfig
+	// This is not part of the StreamConfig, because its scoped to request,
+	// and not to the stream itself.
+	Pedantic bool `json:"pedantic,omitempty"`
+}
+
 // StreamConfig will determine the name, subjects and retention policy
 // for a given stream. If subjects is empty the name will be used.
 type StreamConfig struct {
@@ -380,15 +387,19 @@ const StreamMaxReplicas = 5
 
 // AddStream adds a stream for the given account.
 func (a *Account) addStream(config *StreamConfig) (*stream, error) {
-	return a.addStreamWithAssignment(config, nil, nil)
+	return a.addStreamWithAssignment(config, nil, nil, false)
 }
 
 // AddStreamWithStore adds a stream for the given account with custome store config options.
 func (a *Account) addStreamWithStore(config *StreamConfig, fsConfig *FileStoreConfig) (*stream, error) {
-	return a.addStreamWithAssignment(config, fsConfig, nil)
+	return a.addStreamWithAssignment(config, fsConfig, nil, false)
 }
 
-func (a *Account) addStreamWithAssignment(config *StreamConfig, fsConfig *FileStoreConfig, sa *streamAssignment) (*stream, error) {
+func (a *Account) addStreamPedantic(config *StreamConfig, pedantic bool) (*stream, error) {
+	return a.addStreamWithAssignment(config, nil, nil, pedantic)
+}
+
+func (a *Account) addStreamWithAssignment(config *StreamConfig, fsConfig *FileStoreConfig, sa *streamAssignment, pedantic bool) (*stream, error) {
 	s, jsa, err := a.checkForJetStream()
 	if err != nil {
 		return nil, err
@@ -402,7 +413,7 @@ func (a *Account) addStreamWithAssignment(config *StreamConfig, fsConfig *FileSt
 	}
 
 	// Sensible defaults.
-	cfg, apiErr := s.checkStreamCfg(config, a)
+	cfg, apiErr := s.checkStreamCfg(config, a, pedantic)
 	if apiErr != nil {
 		return nil, apiErr
 	}
@@ -1142,7 +1153,8 @@ func (jsa *jsAccount) subjectsOverlap(subjects []string, self *stream) bool {
 // StreamDefaultDuplicatesWindow default duplicates window.
 const StreamDefaultDuplicatesWindow = 2 * time.Minute
 
-func (s *Server) checkStreamCfg(config *StreamConfig, acc *Account) (StreamConfig, *ApiError) {
+func (s *Server) checkStreamCfg(config *StreamConfig, acc *Account, pedantic bool) (StreamConfig, *ApiError) {
+	fmt.Printf("checkStreamCfg pedantic %v\n", pedantic)
 	lim := &s.getOpts().JetStreamLimits
 
 	if config == nil {
@@ -1199,9 +1211,15 @@ func (s *Server) checkStreamCfg(config *StreamConfig, acc *Account) (StreamConfi
 	if cfg.Duplicates == 0 && cfg.Mirror == nil {
 		maxWindow := StreamDefaultDuplicatesWindow
 		if lim.Duplicates > 0 && maxWindow > lim.Duplicates {
+			if pedantic {
+				return StreamConfig{}, NewJSStreamInvalidConfigError(fmt.Errorf("pedantic mode: duplicate window limits are higher than current limits"))
+			}
 			maxWindow = lim.Duplicates
 		}
 		if cfg.MaxAge != 0 && cfg.MaxAge < maxWindow {
+			if pedantic {
+				return StreamConfig{}, NewJSStreamInvalidConfigError(fmt.Errorf("pedantic mode: duplicate window cannot be bigger than max age"))
+			}
 			cfg.Duplicates = cfg.MaxAge
 		} else {
 			cfg.Duplicates = maxWindow
@@ -1310,14 +1328,26 @@ func (s *Server) checkStreamCfg(config *StreamConfig, acc *Account) (StreamConfi
 			}
 			// Determine if we are inheriting direct gets.
 			if exists, ocfg := getStream(cfg.Mirror.Name); exists {
-				cfg.MirrorDirect = ocfg.AllowDirect
+				if !pedantic {
+					cfg.MirrorDirect = ocfg.AllowDirect
+				}
+				// TODO(jrm): let's make sure that we have to error here. Maybe we can just not default to the mirrored stream value.
+				if pedantic && cfg.MirrorDirect != ocfg.AllowDirect {
+					return StreamConfig{}, NewJSStreamInvalidConfigError(fmt.Errorf("pedantic mode: origin stream has direct get set, mirror has it disabled"))
+				}
 			} else if js := s.getJetStream(); js != nil && js.isClustered() {
 				// Could not find it here. If we are clustered we can look it up.
 				js.mu.RLock()
 				if cc := js.cluster; cc != nil {
 					if as := cc.streams[acc.Name]; as != nil {
 						if sa := as[cfg.Mirror.Name]; sa != nil {
-							cfg.MirrorDirect = sa.Config.AllowDirect
+							if !pedantic {
+								cfg.MirrorDirect = sa.Config.AllowDirect
+							}
+							if pedantic && cfg.MirrorDirect != sa.Config.AllowDirect {
+								js.mu.RUnlock()
+								return StreamConfig{}, NewJSStreamInvalidConfigError(fmt.Errorf("pedantic mode: origin stream has direct get set, mirror has it disabled"))
+							}
 						}
 					}
 				}
@@ -1518,6 +1548,9 @@ func (s *Server) checkStreamCfg(config *StreamConfig, acc *Account) (StreamConfi
 		// Also make sure it does not form a cycle.
 		// Empty same as all.
 		if cfg.RePublish.Source == _EMPTY_ {
+			if pedantic {
+				return StreamConfig{}, NewJSStreamInvalidConfigError(fmt.Errorf("pedantic mode: republish source can not be empty"))
+			}
 			cfg.RePublish.Source = fwcs
 		}
 		var formsCycle bool
@@ -1555,9 +1588,10 @@ func (mset *stream) fileStoreConfig() (FileStoreConfig, error) {
 	return fs.fileStoreConfig(), nil
 }
 
+// TODO(jrm): check if this is all ok
 // Do not hold jsAccount or jetStream lock
-func (jsa *jsAccount) configUpdateCheck(old, new *StreamConfig, s *Server) (*StreamConfig, error) {
-	cfg, apiErr := s.checkStreamCfg(new, jsa.acc())
+func (jsa *jsAccount) configUpdateCheck(old, new *StreamConfig, s *Server, pedantic bool) (*StreamConfig, error) {
+	cfg, apiErr := s.checkStreamCfg(new, jsa.acc(), pedantic)
 	if apiErr != nil {
 		return nil, apiErr
 	}
@@ -1614,6 +1648,7 @@ func (jsa *jsAccount) configUpdateCheck(old, new *StreamConfig, s *Server) (*Str
 		}
 	}
 
+	// TODO(jrm): Can w do those adjustments in pedantic mode?
 	// Do some adjustments for being sealed.
 	if cfg.Sealed {
 		cfg.MaxAge = 0
@@ -1687,6 +1722,7 @@ func (mset *stream) update(config *StreamConfig) error {
 }
 
 // Update will allow certain configuration properties of an existing stream to be updated.
+// TODO(jrm): add pedantic mode here
 func (mset *stream) updateWithAdvisory(config *StreamConfig, sendAdvisory bool) error {
 	_, jsa, err := mset.acc.checkForJetStream()
 	if err != nil {
@@ -1698,7 +1734,8 @@ func (mset *stream) updateWithAdvisory(config *StreamConfig, sendAdvisory bool) 
 	s := mset.srv
 	mset.mu.RUnlock()
 
-	cfg, err := mset.jsa.configUpdateCheck(&ocfg, config, s)
+	// TODO(jrm): I have a feeling that we are calling this method many times. Make sure its safe, as we do not have acces to the pedantic flag here.
+	cfg, err := mset.jsa.configUpdateCheck(&ocfg, config, s, false)
 	if err != nil {
 		return NewJSStreamInvalidConfigError(err, Unless(err))
 	}
@@ -5864,7 +5901,7 @@ func (a *Account) RestoreStream(ncfg *StreamConfig, r io.Reader) (*stream, error
 		return nil, err
 	}
 
-	cfg, apiErr := s.checkStreamCfg(ncfg, a)
+	cfg, apiErr := s.checkStreamCfg(ncfg, a, false)
 	if apiErr != nil {
 		return nil, apiErr
 	}
