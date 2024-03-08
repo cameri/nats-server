@@ -23288,7 +23288,7 @@ func TestJetStreamDirectGetMultiPaging(t *testing.T) {
 	}
 }
 
-func TestJetStreamStreamPedanticMode(t *testing.T) {
+func TestJetStreamStreamCreatePedanticMode(t *testing.T) {
 	cfgFmt := []byte(fmt.Sprintf(`
         jetstream: {
             enabled: true
@@ -23304,52 +23304,190 @@ func TestJetStreamStreamPedanticMode(t *testing.T) {
         }
         no_auth_user: user
 	`, t.TempDir()))
+
 	conf := createConfFile(t, cfgFmt)
 	s, _ := RunServerWithConfig(conf)
 	defer s.Shutdown()
 
-	nc, js := jsClientConnect(t, s)
+	nc, _ := jsClientConnect(t, s)
 	defer nc.Close()
 
-	a, ok := s.accounts.Load("myacc")
-	if !ok {
-		t.Fatalf("Account not found")
+	tests := []struct {
+		name      string
+		cfg       streamConfig
+		shouldErr bool
+		update    bool
+	}{
+		{
+			name: "too_high_duplicate",
+			cfg: streamConfig{
+				StreamConfig: StreamConfig{
+					Name:       "TEST",
+					MaxAge:     time.Minute,
+					Duplicates: time.Hour,
+					Storage:    FileStorage,
+				},
+				Pedantic: true,
+			},
+			shouldErr: true,
+		},
+		{
+			name: "duplicate_over_limits",
+			cfg: streamConfig{
+				StreamConfig: StreamConfig{
+					Name:       "TEST",
+					MaxAge:     time.Hour * 60,
+					Duplicates: time.Hour,
+					Storage:    FileStorage,
+				},
+				Pedantic: false,
+			},
+			shouldErr: true,
+		},
+		{
+			name: "duplicate_window_within_limits",
+			cfg: streamConfig{
+				StreamConfig: StreamConfig{
+					Name:       "TEST",
+					MaxAge:     time.Hour * 60,
+					Duplicates: time.Second * 30,
+					Storage:    FileStorage,
+				},
+				Pedantic: false,
+			},
+			shouldErr: false,
+		},
+		{
+			name: "update_too_high_duplicate",
+			cfg: streamConfig{
+				StreamConfig: StreamConfig{
+					Name:       "TEST",
+					MaxAge:     time.Minute,
+					Duplicates: time.Hour,
+					Storage:    FileStorage,
+				},
+				Pedantic: true,
+			},
+			update:    true,
+			shouldErr: true,
+		},
 	}
-	acc := a.(*Account)
 
-	givenStreamConfig := StreamConfig{
-		Name:       "TEST",
-		MaxAge:     time.Minute,
-		Duplicates: time.Hour,
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if !test.update {
+				_, err := addStreamPedanticWithError(t, nc, &test.cfg)
+				require_True(t, (err != nil) == test.shouldErr)
+			} else {
+				_, err := updateStreamPedanticWithError(t, nc, &test.cfg)
+				require_True(t, (err != nil) == test.shouldErr)
+			}
+		})
 	}
-	_, err := acc.addStreamPedantic(&givenStreamConfig, true)
-	require_Error(t, err)
+}
 
-	givenStreamConfig = StreamConfig{
-		Name:       "TEST",
-		MaxAge:     time.Hour * 60,
-		Duplicates: time.Hour,
-	}
-	_, err = acc.addStreamPedantic(&givenStreamConfig, true)
-	require_Error(t, err)
-
-	givenStreamConfig = StreamConfig{
-		Name:       "TEST",
-		MaxAge:     time.Hour * 60,
-		Duplicates: time.Second * 30,
-	}
-	mset, err := acc.addStreamPedantic(&givenStreamConfig, true)
+func addConsumerWithError(t *testing.T, nc *nats.Conn, cfg *CreateConsumerRequest) (*ConsumerInfo, *ApiError) {
+	t.Helper()
+	req, err := json.Marshal(cfg)
 	require_NoError(t, err)
+	rmsg, err := nc.Request(fmt.Sprintf(JSApiDurableCreateT, cfg.Stream, cfg.Config.Durable), req, 5*time.Second)
 
-	_, err = js.StreamInfo("TEST")
 	require_NoError(t, err)
-
-	givenConfig := StreamConfig{
-		Name:       "TEST",
-		MaxAge:     time.Minute,
-		Duplicates: time.Hour,
+	var resp JSApiConsumerCreateResponse
+	err = json.Unmarshal(rmsg.Data, &resp)
+	require_NoError(t, err)
+	if resp.Type != JSApiConsumerCreateResponseType {
+		t.Fatalf("Invalid response type %s expected %s", resp.Type, JSApiConsumerCreateResponseType)
 	}
-	err = mset.updateWithAdvisory(&givenConfig, false, true)
-	require_Error(t, err)
+	return resp.ConsumerInfo, resp.Error
+}
 
+func TestJetStreamConsumerPedanticMode(t *testing.T) {
+
+	s := RunBasicJetStreamServer(t)
+	defer s.Shutdown()
+
+	nc, _ := jsClientConnect(t, s)
+	defer nc.Close()
+
+	tests := []struct {
+		name        string
+		givenConfig ConsumerConfig
+		shouldError bool
+		pedantic    bool
+		replicas    int
+	}{
+		{
+			name: "default_non_pedantic",
+			givenConfig: ConsumerConfig{
+				Durable: "durable",
+			},
+			shouldError: false,
+			pedantic:    false,
+			replicas:    1,
+		},
+		{
+			name: "default_pedantic",
+			givenConfig: ConsumerConfig{
+				Durable: "durable",
+			},
+			shouldError: true,
+			pedantic:    true,
+			replicas:    1,
+		},
+		{
+			name: "default_non_pedantic_clustered",
+			givenConfig: ConsumerConfig{
+				Durable: "durable",
+			},
+			shouldError: false,
+			pedantic:    false,
+			replicas:    3,
+		},
+		{
+			name: "default_pedantic_clustered",
+			givenConfig: ConsumerConfig{
+				Durable: "durable",
+			},
+			shouldError: true,
+			pedantic:    true,
+			replicas:    3,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+
+			var s *Server
+			if test.replicas == 1 {
+				s = RunBasicJetStreamServer(t)
+				defer s.Shutdown()
+			} else {
+				c := createJetStreamClusterExplicit(t, "R3S", test.replicas)
+				defer c.shutdown()
+				s = c.randomServer()
+			}
+
+			nc, js := jsClientConnect(t, s)
+			defer nc.Close()
+
+			js.AddStream(&nats.StreamConfig{
+				Name:     test.name,
+				Subjects: []string{"foo"},
+				Replicas: test.replicas,
+				ConsumerLimits: nats.StreamConsumerLimits{
+					InactiveThreshold: time.Minute,
+					MaxAckPending:     100,
+				},
+			})
+
+			_, err := addConsumerWithError(t, nc, &CreateConsumerRequest{
+				Stream:   test.name,
+				Config:   test.givenConfig,
+				Action:   ActionCreateOrUpdate,
+				Pedantic: test.pedantic,
+			})
+			require_True(t, (err != nil) == test.shouldError)
+		})
+	}
 }

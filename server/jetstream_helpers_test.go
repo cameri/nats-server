@@ -1609,15 +1609,6 @@ func (c *cluster) stableTotalSubs() (total int) {
 
 }
 
-func addStreamPedantic(t *testing.T, nc *nats.Conn, cfg *streamConfig) *StreamInfo {
-	t.Helper()
-	si, err := addStreamPedanticWithError(t, nc, cfg)
-	if err != nil {
-		t.Fatalf("Unexpected error: %+v", err)
-	}
-	return si
-}
-
 func addStreamPedanticWithError(t *testing.T, nc *nats.Conn, cfg *streamConfig) (*StreamInfo, *ApiError) {
 	t.Helper()
 	req, err := json.Marshal(cfg)
@@ -1633,7 +1624,7 @@ func addStreamPedanticWithError(t *testing.T, nc *nats.Conn, cfg *streamConfig) 
 	return resp.StreamInfo, resp.Error
 }
 
-func updateStreamPedantic(t *testing.T, nc *nats.Conn, cfg *streamConfig) *StreamInfo {
+func updateStreamPedanticWithError(t *testing.T, nc *nats.Conn, cfg *streamConfig) (*StreamInfo, *ApiError) {
 	t.Helper()
 	req, err := json.Marshal(cfg)
 	require_NoError(t, err)
@@ -1645,10 +1636,7 @@ func updateStreamPedantic(t *testing.T, nc *nats.Conn, cfg *streamConfig) *Strea
 	if resp.Type != JSApiStreamUpdateResponseType {
 		t.Fatalf("Invalid response type %s expected %s", resp.Type, JSApiStreamUpdateResponseType)
 	}
-	if resp.Error != nil {
-		t.Fatalf("Unexpected error: %+v", resp.Error)
-	}
-	return resp.StreamInfo
+	return resp.StreamInfo, resp.Error
 }
 
 func addStream(t *testing.T, nc *nats.Conn, cfg *StreamConfig) *StreamInfo {

@@ -1154,7 +1154,6 @@ func (jsa *jsAccount) subjectsOverlap(subjects []string, self *stream) bool {
 const StreamDefaultDuplicatesWindow = 2 * time.Minute
 
 func (s *Server) checkStreamCfg(config *StreamConfig, acc *Account, pedantic bool) (StreamConfig, *ApiError) {
-	fmt.Printf("checkStreamCfg pedantic %v\n", pedantic)
 	lim := &s.getOpts().JetStreamLimits
 
 	if config == nil {
