@@ -581,7 +581,7 @@ func checkConsumerCfg(
 	if cfg.ConsumerLimits.MaxAckPending > 0 && config.MaxAckPending > cfg.ConsumerLimits.MaxAckPending {
 		return NewJSConsumerMaxPendingAckExcessError(cfg.ConsumerLimits.MaxAckPending)
 	}
-	if config.InactiveThreshold > cfg.ConsumerLimits.InactiveThreshold {
+	if cfg.ConsumerLimits.InactiveThreshold > 0 && config.InactiveThreshold > cfg.ConsumerLimits.InactiveThreshold {
 		return NewJSConsumerInactiveThresholdExcessError(cfg.ConsumerLimits.InactiveThreshold)
 	}
 
