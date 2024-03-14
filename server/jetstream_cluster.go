@@ -5935,7 +5935,7 @@ func (js *jetStream) jsClusteredStreamLimitsCheck(acc *Account, cfg *StreamConfi
 	return nil
 }
 
-func (s *Server) jsClusteredStreamRequest(ci *ClientInfo, acc *Account, subject, reply string, rmsg []byte, config *streamConfig) {
+func (s *Server) jsClusteredStreamRequest(ci *ClientInfo, acc *Account, subject, reply string, rmsg []byte, config *StreamRequest) {
 	js, cc := s.getJetStreamCluster()
 	if js == nil || cc == nil {
 		return

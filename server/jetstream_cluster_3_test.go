@@ -6974,7 +6974,7 @@ func TestJetStreamClusterStreamPedantic(t *testing.T) {
 	nc, _ := jsClientConnect(t, c.randomServer())
 	defer nc.Close()
 
-	_, err := addStreamPedanticWithError(t, nc, &streamConfig{
+	_, err := addStreamPedanticWithError(t, nc, &StreamRequest{
 		StreamConfig: StreamConfig{
 			Name:       "TEST",
 			MaxAge:     1 * time.Minute,
@@ -6986,7 +6986,7 @@ func TestJetStreamClusterStreamPedantic(t *testing.T) {
 	require_Error(t, err)
 	fmt.Printf("Error: %v\n", err.Description)
 
-	_, err = addStreamPedanticWithError(t, nc, &streamConfig{
+	_, err = addStreamPedanticWithError(t, nc, &StreamRequest{
 		StreamConfig: StreamConfig{
 			Name:       "TEST",
 			MaxAge:     1 * time.Hour,

@@ -1414,7 +1414,7 @@ func (s *Server) jsStreamCreateRequest(sub *subscription, c *client, _ *Account,
 		return
 	}
 
-	var cfg streamConfig
+	var cfg StreamRequest
 	if err := json.Unmarshal(msg, &cfg); err != nil {
 		resp.Error = NewJSInvalidJSONError()
 		s.sendAPIErrResponse(ci, acc, subject, reply, string(msg), s.jsonResponse(&resp))
@@ -1521,7 +1521,7 @@ func (s *Server) jsStreamUpdateRequest(sub *subscription, c *client, _ *Account,
 		}
 		return
 	}
-	var ncfg streamConfig
+	var ncfg StreamRequest
 	if err := json.Unmarshal(msg, &ncfg); err != nil {
 		resp.Error = NewJSInvalidJSONError()
 		s.sendAPIErrResponse(ci, acc, subject, reply, string(msg), s.jsonResponse(&resp))

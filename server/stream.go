@@ -36,7 +36,8 @@ import (
 	"github.com/nats-io/nuid"
 )
 
-type streamConfig struct {
+// StreamRequest is used to create or update a stream.
+type StreamRequest struct {
 	StreamConfig
 	// This is not part of the StreamConfig, because its scoped to request,
 	// and not to the stream itself.
