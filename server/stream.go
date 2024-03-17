@@ -1739,7 +1739,7 @@ func (mset *stream) updateWithAdvisory(config *StreamConfig, sendAdvisory bool, 
 	mset.mu.RUnlock()
 
 	// TODO(jrm): I have a feeling that we are calling this method many times. Make sure its safe, as we do not have acces to the pedantic flag here.
-	cfg, err := mset.jsa.configUpdateCheck(&ocfg, config, s, false)
+	cfg, err := mset.jsa.configUpdateCheck(&ocfg, config, s, pedantic)
 	if err != nil {
 		return NewJSStreamInvalidConfigError(err, Unless(err))
 	}
