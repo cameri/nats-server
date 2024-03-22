@@ -173,6 +173,9 @@ const (
 	// JSConsumerOverlappingSubjectFilters consumer subject filters cannot overlap
 	JSConsumerOverlappingSubjectFilters ErrorIdentifier = 10138
 
+	// JSConsumerPedanticErrF pedantic mode: {err}
+	JSConsumerPedanticErrF ErrorIdentifier = 10154
+
 	// JSConsumerPullNotDurableErr consumer in pull mode requires a durable name
 	JSConsumerPullNotDurableErr ErrorIdentifier = 10085
 
@@ -520,6 +523,7 @@ var (
 		JSConsumerOfflineErr:                       {Code: 500, ErrCode: 10119, Description: "consumer is offline"},
 		JSConsumerOnMappedErr:                      {Code: 400, ErrCode: 10092, Description: "consumer direct on a mapped consumer"},
 		JSConsumerOverlappingSubjectFilters:        {Code: 400, ErrCode: 10138, Description: "consumer subject filters cannot overlap"},
+		JSConsumerPedanticErrF:                     {Code: 400, ErrCode: 10154, Description: "pedantic mode: {err}"},
 		JSConsumerPullNotDurableErr:                {Code: 400, ErrCode: 10085, Description: "consumer in pull mode requires a durable name"},
 		JSConsumerPullRequiresAckErr:               {Code: 400, ErrCode: 10084, Description: "consumer in pull mode requires ack policy"},
 		JSConsumerPullWithRateLimitErr:             {Code: 400, ErrCode: 10086, Description: "consumer in pull mode can not have rate limit set"},
@@ -1259,6 +1263,22 @@ func NewJSConsumerOverlappingSubjectFiltersError(opts ...ErrorOption) *ApiError 
 	}
 
 	return ApiErrors[JSConsumerOverlappingSubjectFilters]
+}
+
+// NewJSConsumerPedanticError creates a new JSConsumerPedanticErrF error: "pedantic mode: {err}"
+func NewJSConsumerPedanticError(err error, opts ...ErrorOption) *ApiError {
+	eopts := parseOpts(opts)
+	if ae, ok := eopts.err.(*ApiError); ok {
+		return ae
+	}
+
+	e := ApiErrors[JSConsumerPedanticErrF]
+	args := e.toReplacerArgs([]interface{}{"{err}", err})
+	return &ApiError{
+		Code:        e.Code,
+		ErrCode:     e.ErrCode,
+		Description: strings.NewReplacer(args...).Replace(e.Description),
+	}
 }
 
 // NewJSConsumerPullNotDurableError creates a new JSConsumerPullNotDurableErr error: "consumer in pull mode requires a durable name"

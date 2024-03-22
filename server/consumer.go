@@ -441,7 +441,7 @@ const (
 )
 
 // Helper function to set consumer config defaults from above.
-func setConsumerConfigDefaults(config *ConsumerConfig, streamCfg *StreamConfig, lim *JSLimitOpts, accLim *JetStreamAccountLimits, pedantic bool) {
+func setConsumerConfigDefaults(config *ConsumerConfig, streamCfg *StreamConfig, lim *JSLimitOpts, accLim *JetStreamAccountLimits, pedantic bool) *ApiError {
 	// Set to default if not specified.
 	if config.DeliverSubject == _EMPTY_ && config.MaxWaiting == 0 {
 		config.MaxWaiting = JSWaitQueueDefaultMax
@@ -455,19 +455,22 @@ func setConsumerConfigDefaults(config *ConsumerConfig, streamCfg *StreamConfig, 
 		config.MaxDeliver = -1
 	}
 	// If BackOff was specified that will override the AckWait and the MaxDeliver.
-	if len(config.BackOff) > 0 && !pedantic {
+	if len(config.BackOff) > 0 {
+		if pedantic && config.AckWait != config.BackOff[0] {
+			return NewJSConsumerPedanticError(errors.New("first backoff value has to batch AckWait"))
+		}
 		config.AckWait = config.BackOff[0]
 	}
 	if config.MaxAckPending == 0 {
-		// we are pedantic mode and have limits set on stream
-		if !pedantic && (streamCfg.ConsumerLimits.MaxAckPending != 0) {
-			config.MaxAckPending = streamCfg.ConsumerLimits.MaxAckPending
+		if pedantic && streamCfg.ConsumerLimits.MaxAckPending > 0 {
+			return NewJSConsumerPedanticError(errors.New("max_ack_pending must set"))
 		}
-		if pedantic {
-			config.MaxAckPending = JsDefaultMaxAckPending
-		}
+		config.MaxAckPending = streamCfg.ConsumerLimits.MaxAckPending
 	}
-	if config.InactiveThreshold == 0 && !pedantic {
+	if config.InactiveThreshold == 0 {
+		if streamCfg.ConsumerLimits.InactiveThreshold > 0 && pedantic {
+			return NewJSConsumerPedanticError(errors.New("inactive_threshold must if limits are set"))
+		}
 		config.InactiveThreshold = streamCfg.ConsumerLimits.InactiveThreshold
 	}
 	// Set proper default for max ack pending if we are ack explicit and none has been set.
@@ -482,9 +485,13 @@ func setConsumerConfigDefaults(config *ConsumerConfig, streamCfg *StreamConfig, 
 		config.MaxAckPending = accPending
 	}
 	// if applicable set max request batch size
-	if config.DeliverSubject == _EMPTY_ && config.MaxRequestBatch == 0 && lim.MaxRequestBatch > 0 && !pedantic {
+	if config.DeliverSubject == _EMPTY_ && config.MaxRequestBatch == 0 && lim.MaxRequestBatch > 0 {
+		if pedantic {
+			return NewJSConsumerPedanticError(errors.New("max_request_batch must be set if limits are set"))
+		}
 		config.MaxRequestBatch = lim.MaxRequestBatch
 	}
+	return nil
 }
 
 // Check the consumer config. If we are recovering don't check filter subjects.
@@ -753,8 +760,11 @@ func (mset *stream) addConsumerWithAssignment(config *ConsumerConfig, oname stri
 	// Make sure we have sane defaults. Do so with the JS lock, otherwise a
 	// badly timed meta snapshot can result in a race condition.
 	mset.js.mu.Lock()
-	setConsumerConfigDefaults(config, &mset.cfg, srvLim, &selectedLimits, pedantic)
+	err := setConsumerConfigDefaults(config, &mset.cfg, srvLim, &selectedLimits, pedantic)
 	mset.js.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
 
 	if err := checkConsumerCfg(config, srvLim, &cfg, acc, &selectedLimits, isRecovering); err != nil {
 		return nil, err
