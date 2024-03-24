@@ -1212,13 +1212,13 @@ func (s *Server) checkStreamCfg(config *StreamConfig, acc *Account, pedantic boo
 		maxWindow := StreamDefaultDuplicatesWindow
 		if lim.Duplicates > 0 && maxWindow > lim.Duplicates {
 			if pedantic {
-				return StreamConfig{}, NewJSStreamInvalidConfigError(fmt.Errorf("pedantic mode: duplicate window limits are higher than current limits"))
+				return StreamConfig{}, NewJSPedanticError(fmt.Errorf("pedantic mode: duplicate window limits are higher than current limits"))
 			}
 			maxWindow = lim.Duplicates
 		}
 		if cfg.MaxAge != 0 && cfg.MaxAge < maxWindow {
 			if pedantic {
-				return StreamConfig{}, NewJSStreamInvalidConfigError(fmt.Errorf("pedantic mode: duplicate window cannot be bigger than max age"))
+				return StreamConfig{}, NewJSPedanticError(fmt.Errorf("pedantic mode: duplicate window cannot be bigger than max age"))
 			}
 			cfg.Duplicates = cfg.MaxAge
 		} else {
@@ -1333,7 +1333,7 @@ func (s *Server) checkStreamCfg(config *StreamConfig, acc *Account, pedantic boo
 				}
 				// TODO(jrm): let's make sure that we have to error here. Maybe we can just not default to the mirrored stream value.
 				if pedantic && cfg.MirrorDirect != ocfg.AllowDirect {
-					return StreamConfig{}, NewJSStreamInvalidConfigError(fmt.Errorf("pedantic mode: origin stream has direct get set, mirror has it disabled"))
+					return StreamConfig{}, NewJSPedanticError(fmt.Errorf("pedantic mode: origin stream has direct get set, mirror has it disabled"))
 				}
 			} else if js := s.getJetStream(); js != nil && js.isClustered() {
 				// Could not find it here. If we are clustered we can look it up.
@@ -1346,7 +1346,7 @@ func (s *Server) checkStreamCfg(config *StreamConfig, acc *Account, pedantic boo
 							}
 							if pedantic && cfg.MirrorDirect != sa.Config.AllowDirect {
 								js.mu.RUnlock()
-								return StreamConfig{}, NewJSStreamInvalidConfigError(fmt.Errorf("pedantic mode: origin stream has direct get set, mirror has it disabled"))
+								return StreamConfig{}, NewJSPedanticError(fmt.Errorf("pedantic mode: origin stream has direct get set, mirror has it disabled"))
 							}
 						}
 					}
@@ -1549,7 +1549,7 @@ func (s *Server) checkStreamCfg(config *StreamConfig, acc *Account, pedantic boo
 		// Empty same as all.
 		if cfg.RePublish.Source == _EMPTY_ {
 			if pedantic {
-				return StreamConfig{}, NewJSStreamInvalidConfigError(fmt.Errorf("pedantic mode: republish source can not be empty"))
+				return StreamConfig{}, NewJSPedanticError(fmt.Errorf("pedantic mode: republish source can not be empty"))
 			}
 			cfg.RePublish.Source = fwcs
 		}

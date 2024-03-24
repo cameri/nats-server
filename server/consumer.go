@@ -457,19 +457,19 @@ func setConsumerConfigDefaults(config *ConsumerConfig, streamCfg *StreamConfig, 
 	// If BackOff was specified that will override the AckWait and the MaxDeliver.
 	if len(config.BackOff) > 0 {
 		if pedantic && config.AckWait != config.BackOff[0] {
-			return NewJSConsumerPedanticError(errors.New("first backoff value has to batch AckWait"))
+			return NewJSPedanticError(errors.New("first backoff value has to equal batch AckWait"))
 		}
 		config.AckWait = config.BackOff[0]
 	}
 	if config.MaxAckPending == 0 {
 		if pedantic && streamCfg.ConsumerLimits.MaxAckPending > 0 {
-			return NewJSConsumerPedanticError(errors.New("max_ack_pending must set"))
+			return NewJSPedanticError(errors.New("max_ack_pending must be set"))
 		}
 		config.MaxAckPending = streamCfg.ConsumerLimits.MaxAckPending
 	}
 	if config.InactiveThreshold == 0 {
 		if streamCfg.ConsumerLimits.InactiveThreshold > 0 && pedantic {
-			return NewJSConsumerPedanticError(errors.New("inactive_threshold must if limits are set"))
+			return NewJSPedanticError(errors.New("inactive_threshold must be set if limits are set"))
 		}
 		config.InactiveThreshold = streamCfg.ConsumerLimits.InactiveThreshold
 	}
@@ -487,7 +487,7 @@ func setConsumerConfigDefaults(config *ConsumerConfig, streamCfg *StreamConfig, 
 	// if applicable set max request batch size
 	if config.DeliverSubject == _EMPTY_ && config.MaxRequestBatch == 0 && lim.MaxRequestBatch > 0 {
 		if pedantic {
-			return NewJSConsumerPedanticError(errors.New("max_request_batch must be set if limits are set"))
+			return NewJSPedanticError(errors.New("max_request_batch must be set if limits are set"))
 		}
 		config.MaxRequestBatch = lim.MaxRequestBatch
 	}
