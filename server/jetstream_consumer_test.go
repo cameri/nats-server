@@ -1070,6 +1070,184 @@ func TestJetStreamConsumerDelete(t *testing.T) {
 	}
 }
 
+func TestJetStreamConsumerPedanticMode(t *testing.T) {
+
+	singleServerTemplate := `
+			listen: 127.0.0.1:-1
+			jetstream: {
+				max_mem_store: 2MB,
+				max_file_store: 8MB,
+				store_dir: '%s',
+				limits: {max_request_batch: 250}
+			}
+			no_auth_user: u
+			accounts {
+				ONE {
+					users = [ { user: "u", pass: "s3cr3t!" } ]
+					jetstream: enabled
+				}
+				$SYS { users = [ { user: "admin", pass: "s3cr3t!" } ] }
+			}`
+
+	clusterTemplate := `
+			listen: 127.0.0.1:-1
+			server_name: %s
+			jetstream: {
+				max_mem_store: 2MB,
+				max_file_store: 8MB,
+				store_dir: '%s',
+				limits: {max_request_batch: 250}
+			}
+			cluster {
+				name: %s
+				listen: 127.0.0.1:%d
+				routes = [%s]
+			}
+			no_auth_user: u
+			accounts {
+				ONE {
+					users = [ { user: "u", pass: "s3cr3t!" } ]
+					jetstream: enabled
+				}
+				$SYS { users = [ { user: "admin", pass: "s3cr3t!" } ] }
+			}`
+
+	s := RunBasicJetStreamServer(t)
+	defer s.Shutdown()
+
+	nc, _ := jsClientConnect(t, s)
+	defer nc.Close()
+
+	tests := []struct {
+		name                  string
+		givenConfig           ConsumerConfig
+		givenLimits           nats.StreamConsumerLimits
+		serverTemplateSingle  string
+		serverTemplateCluster string
+		shouldError           bool
+		pedantic              bool
+		replicas              int
+	}{
+		{
+			name: "default_non_pedantic",
+			givenConfig: ConsumerConfig{
+				Durable: "durable",
+			},
+			givenLimits: nats.StreamConsumerLimits{
+				InactiveThreshold: time.Minute,
+				MaxAckPending:     100,
+			},
+			shouldError: false,
+			pedantic:    false,
+		},
+		{
+			name: "default_pedantic_inactive_threshold",
+			givenConfig: ConsumerConfig{
+				Durable: "durable",
+			},
+			givenLimits: nats.StreamConsumerLimits{
+				InactiveThreshold: time.Minute,
+			},
+			shouldError: true,
+			pedantic:    true,
+		},
+		{
+			name: "default_pedantic_max_ack_pending",
+			givenConfig: ConsumerConfig{
+				Durable: "durable",
+			},
+			givenLimits: nats.StreamConsumerLimits{
+				MaxAckPending: 100,
+			},
+			shouldError: true,
+			pedantic:    true,
+		},
+		{
+			name: "pedantic_backoff_no_ack_wait",
+			givenConfig: ConsumerConfig{
+				Durable: "durable",
+				BackOff: []time.Duration{time.Second, time.Minute},
+			},
+			pedantic:    true,
+			shouldError: true,
+		},
+		{
+			name: "backoff_no_ack_wait",
+			givenConfig: ConsumerConfig{
+				Durable: "durable",
+				BackOff: []time.Duration{time.Second, time.Minute},
+			},
+			pedantic:    false,
+			shouldError: false,
+		},
+		{
+			name: "max_batch_requests",
+			givenConfig: ConsumerConfig{
+				Durable: "durable",
+			},
+			serverTemplateSingle:  singleServerTemplate,
+			serverTemplateCluster: clusterTemplate,
+			pedantic:              false,
+			shouldError:           false,
+		},
+		{
+			name: "pedantic_max_batch_requests",
+			givenConfig: ConsumerConfig{
+				Durable: "durable",
+			},
+			serverTemplateSingle:  singleServerTemplate,
+			serverTemplateCluster: clusterTemplate,
+			pedantic:              true,
+			shouldError:           true,
+		},
+	}
+
+	for _, test := range tests {
+		for _, mode := range []string{"clustered", "single"} {
+			t.Run(fmt.Sprintf("%v_%v", mode, test.name), func(t *testing.T) {
+
+				var s *Server
+				if mode == "single" {
+					s = RunBasicJetStreamServer(t)
+					defer s.Shutdown()
+				} else {
+					c := createJetStreamClusterExplicit(t, "R3S", 3)
+					defer c.shutdown()
+					s = c.randomServer()
+				}
+
+				replicas := 1
+				if mode == "clustered" {
+					replicas = 3
+				}
+
+				nc, js := jsClientConnect(t, s)
+				defer nc.Close()
+
+				js.AddStream(&nats.StreamConfig{
+					Name:     test.name,
+					Subjects: []string{"foo"},
+					Replicas: replicas,
+					ConsumerLimits: nats.StreamConsumerLimits{
+						InactiveThreshold: time.Minute,
+						MaxAckPending:     100,
+					},
+				})
+
+				_, err := addConsumerWithError(t, nc, &CreateConsumerRequest{
+					Stream:   test.name,
+					Config:   test.givenConfig,
+					Action:   ActionCreateOrUpdate,
+					Pedantic: test.pedantic,
+				})
+				require_True(t, (err != nil) == test.shouldError)
+				if err != nil {
+					require_True(t, strings.Contains(err.Error(), "pedantic"))
+				}
+			})
+		}
+	}
+}
 func Benchmark____JetStreamConsumerIsFilteredMatch(b *testing.B) {
 	subject := "foo.bar.do.not.match.any.filter.subject"
 	for n := 1; n <= 1024; n *= 2 {

@@ -2580,7 +2580,7 @@ func (s *Server) jsLeaderServerStreamMoveRequest(sub *subscription, c *client, _
 		streamName, accName, cfg.Replicas, s.peerSetToNames(currPeers), s.peerSetToNames(peers))
 
 	// We will always have peers and therefore never do a callout, therefore it is safe to call inline
-	// We should be fine ignoring pedantic mode here.
+	// We should be fine ignoring pedantic mode here. as we do not touch configuration.
 	s.jsClusteredStreamUpdateRequest(&ciNew, targetAcc.(*Account), subject, reply, rmsg, &cfg, peers, false)
 }
 

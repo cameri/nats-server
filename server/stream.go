@@ -1328,26 +1328,21 @@ func (s *Server) checkStreamCfg(config *StreamConfig, acc *Account, pedantic boo
 			}
 			// Determine if we are inheriting direct gets.
 			if exists, ocfg := getStream(cfg.Mirror.Name); exists {
-				if !pedantic {
-					cfg.MirrorDirect = ocfg.AllowDirect
-				}
-				// TODO(jrm): let's make sure that we have to error here. Maybe we can just not default to the mirrored stream value.
 				if pedantic && cfg.MirrorDirect != ocfg.AllowDirect {
 					return StreamConfig{}, NewJSPedanticError(fmt.Errorf("pedantic mode: origin stream has direct get set, mirror has it disabled"))
 				}
+				cfg.MirrorDirect = ocfg.AllowDirect
 			} else if js := s.getJetStream(); js != nil && js.isClustered() {
 				// Could not find it here. If we are clustered we can look it up.
 				js.mu.RLock()
 				if cc := js.cluster; cc != nil {
 					if as := cc.streams[acc.Name]; as != nil {
 						if sa := as[cfg.Mirror.Name]; sa != nil {
-							if !pedantic {
-								cfg.MirrorDirect = sa.Config.AllowDirect
-							}
 							if pedantic && cfg.MirrorDirect != sa.Config.AllowDirect {
 								js.mu.RUnlock()
 								return StreamConfig{}, NewJSPedanticError(fmt.Errorf("pedantic mode: origin stream has direct get set, mirror has it disabled"))
 							}
+							cfg.MirrorDirect = sa.Config.AllowDirect
 						}
 					}
 				}
@@ -1648,8 +1643,8 @@ func (jsa *jsAccount) configUpdateCheck(old, new *StreamConfig, s *Server, pedan
 		}
 	}
 
-	// TODO(jrm): Can w do those adjustments in pedantic mode?
 	// Do some adjustments for being sealed.
+	// Pedantic mode will allow those changes to be made, as they are determinictic and important to get a sealed stream.
 	if cfg.Sealed {
 		cfg.MaxAge = 0
 		cfg.Discard = DiscardNew
