@@ -2839,9 +2839,19 @@ func (n *raft) trackResponse(ar *appendEntryResponse) {
 		if nr := len(results); nr >= n.qn {
 			// We have a quorum.
 			for index := n.commit + 1; index <= ar.index; index++ {
+
+				if results := n.acks[index]; results == nil {
+					fmt.Printf("[NEIL_3] trackResponse::apply no ACKs for index %d found\n", index)
+				} else if nr := len(results); nr < n.qn {
+					fmt.Printf("[NEIL_4] trackResponse::apply no quorum for index %d\n", index)
+				}
+
 				if err := n.applyCommit(index); err != nil && err != errNodeClosed {
+					fmt.Printf("[NEIL_5] trackResponse::apply apply index %d error: %s\n", index, err)
 					n.error("Got an error applying commit for %d: %v", index, err)
 					break
+				} else if err == nil {
+					fmt.Printf("[NEIL_6] trackResponse::apply applied index %d without error\n", index)
 				}
 			}
 			sendHB = n.prop.len() == 0
@@ -3536,6 +3546,7 @@ func (n *raft) sendAppendEntry(entries []*Entry) {
 	shouldStore := ae.shouldStore()
 	if shouldStore {
 		if err := n.storeToWAL(ae); err != nil {
+			fmt.Printf("[NEIL_2] sendAppendEntry::storeToWAL error: %s\n", err)
 			return
 		}
 		// We count ourselves.
@@ -4087,9 +4098,13 @@ func (n *raft) switchToLeader() {
 	n.lxfer = false
 	n.updateLeader(n.id)
 	n.switchState(Leader)
+
+	lastSeq := state.LastSeq
+	commit := n.commit
 	n.Unlock()
 
 	if sendHB {
+		fmt.Printf("[NEIL_1] switchToLeader::sendHB - state.LastSeq: %d, n.commit: %d\n", lastSeq, commit)
 		n.sendHeartbeat()
 	}
 }
